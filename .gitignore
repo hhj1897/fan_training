@@ -1,0 +1,9 @@
+.ipynb_checkpoints
+.vscode
+.idea
+*.pyc
+build
+dist
+*.egg-info
+data/300w
+data/300w_lp
