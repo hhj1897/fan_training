@@ -1,8 +1,9 @@
+import torch
 import numpy as np
 from copy import deepcopy
 
 
-__all__ = ['load_pts', 'save_pts', 'flip_landmarks', 'plot_landmarks']
+__all__ = ['load_pts', 'save_pts', 'flip_landmarks', 'encode_landmarks', 'decode_landmarks']
 
 
 def load_pts(pts_path, one_based=True):
@@ -45,3 +46,72 @@ def flip_landmarks(landmarks, im_width):
     result[:, 0] = im_width - result[:, 0]
 
     return result
+
+
+def encode_landmarks(landmarks, heatmap_width, heatmap_height, gaussian_size, sigma):
+    heatmaps = torch.zeros(landmarks.shape[0], heatmap_height, heatmap_width, dtype=torch.float32)
+    for idx, pt in enumerate(landmarks):
+        # Check that any part of the gaussian is in-bounds
+        tl = np.round(pt - gaussian_size * sigma).astype(int)
+        br = np.round(pt + gaussian_size * sigma).astype(int) + 1
+        if tl[0] < heatmaps.shape[2] and tl[1] < heatmaps.shape[1] and br[0] > 0 and br[1] > 0:
+            # Generate gaussian
+            kernel_dim = br - tl
+            x = torch.arange(0.5, kernel_dim[0], dtype=torch.float32)
+            y = torch.arange(0.5, kernel_dim[1], dtype=torch.float32).unsqueeze(-1)
+            x0, y0 = pt - tl
+            # The gaussian is not normalized, we want the center value to be 1
+            g = torch.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+
+            # Usable gaussian range
+            g_x = max(0, -tl[0]), min(br[0], heatmaps.shape[2]) - tl[0]
+            g_y = max(0, -tl[1]), min(br[1], heatmaps.shape[1]) - tl[1]
+            # Image range
+            img_x = max(0, tl[0]), min(br[0], heatmaps.shape[2])
+            img_y = max(0, tl[1]), min(br[1], heatmaps.shape[1])
+
+            heatmaps[idx, img_y[0]: img_y[1], img_x[0]: img_x[1]] = g[g_y[0]: g_y[1], g_x[0]: g_x[1]]
+    return heatmaps
+
+
+def decode_landmarks(heatmaps, gamma=1.0, radius=0.1):
+    if heatmaps.dim() == 3:
+        landmarks, scores = decode_landmarks(heatmaps.unsqueeze(0))
+        return landmarks[0], scores[0]
+
+    heatmaps = heatmaps.contiguous()
+    scores = heatmaps.max(dim=3)[0].max(dim=2)[0]
+
+    if radius ** 2 * heatmaps.shape[2] * heatmaps.shape[3] < heatmaps.shape[2] ** 2 + heatmaps.shape[3] ** 2:
+        # Find peaks in all heatmaps
+        m = heatmaps.view(heatmaps.shape[0] * heatmaps.shape[1], -1).argmax(1)
+        all_peaks = torch.cat(
+            [(m // heatmaps.shape[3]).view(-1, 1), (m % heatmaps.shape[3]).view(-1, 1)], dim=1
+        ).reshape((heatmaps.shape[0], heatmaps.shape[1], 1, 1, 2)).repeat(
+            1, 1, heatmaps.shape[2], heatmaps.shape[3], 1).float()
+
+        # Apply masks created from the peaks
+        all_indices = torch.zeros_like(all_peaks) + torch.stack(
+            [torch.arange(0.0, all_peaks.shape[2],
+                          device=all_peaks.device).unsqueeze(-1).repeat(1, all_peaks.shape[3]),
+             torch.arange(0.0, all_peaks.shape[3],
+                          device=all_peaks.device).unsqueeze(0).repeat(all_peaks.shape[2], 1)], dim=-1)
+        heatmaps = heatmaps * ((all_indices - all_peaks).norm(dim=-1) <= radius *
+                               (heatmaps.shape[2] * heatmaps.shape[3]) ** 0.5).float()
+
+    # Prepare the indices for calculating centroids
+    x_indices = (torch.zeros((*heatmaps.shape[:2], heatmaps.shape[3]), device=heatmaps.device) +
+                 torch.arange(0.5, heatmaps.shape[3], device=heatmaps.device))
+    y_indices = (torch.zeros(heatmaps.shape[:3], device=heatmaps.device) +
+                 torch.arange(0.5, heatmaps.shape[2], device=heatmaps.device))
+
+    # Finally, find centroids as landmark locations
+    heatmaps = heatmaps.clamp_min(0.0)
+    if gamma != 1.0:
+        heatmaps = heatmaps.pow(gamma)
+    m00s = heatmaps.sum(dim=(2, 3))
+    xs = heatmaps.sum(dim=2).mul(x_indices).sum(dim=2).div(m00s)
+    ys = heatmaps.sum(dim=3).mul(y_indices).sum(dim=2).div(m00s)
+
+    lm_info = torch.stack((xs, ys, scores), dim=-1).cpu().numpy()
+    return lm_info[..., :-1], lm_info[..., -1]
