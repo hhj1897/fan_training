@@ -43,10 +43,11 @@ class LandmarkDataset(Dataset):
 
     @staticmethod
     def create_config(image_size=256, heatmap_size=64, heatmap_gaussian_size=5, heatmap_gaussian_sigma=1,
-                      crop_ratio=0.55, temp_padding_factor=1):
+                      heatmap_with_subpixel_sampling=True, crop_ratio=0.55, temp_padding_factor=1):
         return SimpleNamespace(image_size=image_size, heatmap_size=heatmap_size,
                                heatmap_gaussian_size=heatmap_gaussian_size,
                                heatmap_gaussian_sigma=heatmap_gaussian_sigma,
+                               heatmap_with_subpixel_sampling=heatmap_with_subpixel_sampling,
                                crop_ratio=crop_ratio, temp_padding_factor=temp_padding_factor)
 
     @staticmethod
@@ -125,6 +126,7 @@ class LandmarkDataset(Dataset):
         # Create the label heatmaps
         heatmaps = encode_landmarks(landmarks / self.config.image_size * self.config.heatmap_size,
                                     self.config.heatmap_size, self.config.heatmap_size,
-                                    self.config.heatmap_gaussian_size, self.config.heatmap_gaussian_sigma)
+                                    self.config.heatmap_gaussian_size, self.config.heatmap_gaussian_sigma,
+                                    self.config.heatmap_with_subpixel_sampling)
 
         return image, heatmaps, torch.from_numpy(landmarks), torch.from_numpy(face_corners), self._samples[item]

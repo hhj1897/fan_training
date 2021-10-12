@@ -48,18 +48,27 @@ def flip_landmarks(landmarks, im_width):
     return result
 
 
-def encode_landmarks(landmarks, heatmap_width, heatmap_height, gaussian_size, sigma):
+def encode_landmarks(landmarks, heatmap_width, heatmap_height, gaussian_size, sigma, use_subpixel_sampling=True):
     heatmaps = torch.zeros(landmarks.shape[0], heatmap_height, heatmap_width, dtype=torch.float32)
     for idx, pt in enumerate(landmarks):
         # Check that any part of the gaussian is in-bounds
-        tl = np.round(pt - gaussian_size * sigma).astype(int)
-        br = np.round(pt + gaussian_size * sigma).astype(int) + 1
+        if use_subpixel_sampling:
+            tl = np.round(pt - gaussian_size * sigma).astype(int)
+            br = np.round(pt + gaussian_size * sigma).astype(int) + 1
+        else:
+            tl = (pt - gaussian_size * sigma).astype(int)
+            br = (pt + gaussian_size * sigma).astype(int) + 1
         if tl[0] < heatmaps.shape[2] and tl[1] < heatmaps.shape[1] and br[0] > 0 and br[1] > 0:
             # Generate gaussian
             kernel_dim = br - tl
-            x = torch.arange(0.5, kernel_dim[0], dtype=torch.float32)
-            y = torch.arange(0.5, kernel_dim[1], dtype=torch.float32).unsqueeze(-1)
-            x0, y0 = pt - tl
+            if use_subpixel_sampling:
+                x = torch.arange(0.5, kernel_dim[0], dtype=torch.float32)
+                y = torch.arange(0.5, kernel_dim[1], dtype=torch.float32).unsqueeze(-1)
+                x0, y0 = pt - tl
+            else:
+                x = torch.arange(0, kernel_dim[0], dtype=torch.float32)
+                y = torch.arange(0, kernel_dim[1], dtype=torch.float32).unsqueeze(-1)
+                x0, y0 = kernel_dim // 2
             # The gaussian is not normalized, we want the center value to be 1
             g = torch.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
 
