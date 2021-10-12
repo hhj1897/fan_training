@@ -127,4 +127,4 @@ class LandmarkDataset(Dataset):
                                     self.config.heatmap_size, self.config.heatmap_size,
                                     self.config.heatmap_gaussian_size, self.config.heatmap_gaussian_sigma)
 
-        return image, heatmaps, landmarks, face_corners, self._samples[item]
+        return image, heatmaps, torch.from_numpy(landmarks), torch.from_numpy(face_corners), self._samples[item]

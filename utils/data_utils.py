@@ -113,5 +113,4 @@ def decode_landmarks(heatmaps, gamma=1.0, radius=0.1):
     xs = heatmaps.sum(dim=2).mul(x_indices).sum(dim=2).div(m00s)
     ys = heatmaps.sum(dim=3).mul(y_indices).sum(dim=2).div(m00s)
 
-    lm_info = torch.stack((xs, ys, scores), dim=-1).cpu().numpy()
-    return lm_info[..., :-1], lm_info[..., -1]
+    return torch.stack((xs, ys), dim=-1), scores
