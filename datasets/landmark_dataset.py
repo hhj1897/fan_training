@@ -14,15 +14,15 @@ class LandmarkDataset(Dataset):
     def __init__(self, tsv_path, partitions, config=None, geometric_transform=None,
                  content_transform=None, random_flip=False):
         self._samples = []
+        self.weight_norm = 0.0
         tsv_folder = os.path.dirname(tsv_path)
-        total_weights = 0.0
         with open(tsv_path, 'r') as f:
             for line in f.read().splitlines()[1:]:
                 fields = line.split('\t')
                 subset, split = fields[:2]
                 if (subset, split) in partitions:
                     weight = np.ceil(5 * 0.8 ** int(fields[2]))
-                    total_weights += weight
+                    self.weight_norm += weight
                     im_path, pts_path = fields[3:5]
                     if not os.path.isabs(im_path):
                         im_path = os.path.abspath(os.path.join(tsv_folder, im_path))
@@ -32,8 +32,7 @@ class LandmarkDataset(Dataset):
                     self._samples.append({'subset': subset, 'split': split, 'weight': weight,
                                           'im_path': im_path, 'pts_path': pts_path,
                                           'face_box': face_box})
-        for sample in self._samples:
-            sample['weight'] /= total_weights / len(self._samples)
+        self.weight_norm /= len(self._samples)
         if config is None:
             self.config = LandmarkDataset.create_config()
         else:
@@ -107,12 +106,17 @@ class LandmarkDataset(Dataset):
             all_transforms, keypoint_params=augs.KeypointParams(format='xy', remove_invisible=False))
 
         # Transform the image and the landmarks
-        trans_res = composite_trans(image=image, keypoints=landmarks)
-        image, landmarks = trans_res['image'], np.array(trans_res['keypoints'])
+        face_corners = [face_box[0], [face_box[1, 0], face_box[0, 1]], face_box[1], [face_box[0, 0], face_box[1, 1]]]
+        trans_res = composite_trans(image=image, keypoints=np.vstack((landmarks, face_corners)))
+        image, warped_keypoints = trans_res['image'], trans_res['keypoints']
+        landmarks = np.array(warped_keypoints[:-4])
+        face_corners = np.array(warped_keypoints[-4:])
 
         # Random flip needs to be handled manually
         if self.random_flip and random.random() < 0.5:
             landmarks = flip_landmarks(landmarks, image.shape[1])
+            face_corners[:, 0] = image.shape[1] - face_corners[:, 0]
+            face_corners = np.ascontiguousarray(face_corners[[1, 0, 3, 2]])
             image = cv2.flip(image, 1)
 
         # Image to tensor
@@ -123,4 +127,4 @@ class LandmarkDataset(Dataset):
                                     self.config.heatmap_size, self.config.heatmap_size,
                                     self.config.heatmap_gaussian_size, self.config.heatmap_gaussian_sigma)
 
-        return image, heatmaps, landmarks, self._samples[item]
+        return image, heatmaps, landmarks, face_corners, self._samples[item]

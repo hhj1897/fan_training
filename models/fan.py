@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from types import SimpleNamespace
 
 
 def conv3x3(in_planes, out_planes, strd=1, padding=1, bias=False):
@@ -97,9 +98,12 @@ class HourGlass(nn.Module):
 
 
 class FAN(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config=None):
         super(FAN, self).__init__()
-        self.config = config
+        if config is None:
+            self.config = FAN.create_config()
+        else:
+            self.config = config
 
         # Stem
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
@@ -136,9 +140,8 @@ class FAN(nn.Module):
         x = self.conv3(x)
         x = self.conv4(x)
 
+        outputs = []
         previous = x
-        hg_feats = []
-        tmp_out = None
         for i in range(self.config.num_modules):
             hg = self._modules['m' + str(i)](previous)
 
@@ -149,12 +152,16 @@ class FAN(nn.Module):
 
             # Predict heatmaps
             tmp_out = self._modules['l' + str(i)](ll)
+            outputs.append(tmp_out)
 
             if i < self.config.num_modules - 1:
                 ll = self._modules['bl' + str(i)](ll)
                 tmp_out_ = self._modules['al' + str(i)](tmp_out)
                 previous = previous + ll + tmp_out_
 
-            hg_feats.append(ll)
+        return outputs
 
-        return tmp_out, x, tuple(hg_feats)
+    @staticmethod
+    def create_config(input_size=256, num_modules=2, hg_num_features=256, hg_depth=4, use_avg_pool=False):
+        return SimpleNamespace(input_size=input_size, num_modules=num_modules, hg_num_features=hg_num_features,
+                               hg_depth=hg_depth, use_avg_pool=use_avg_pool)
