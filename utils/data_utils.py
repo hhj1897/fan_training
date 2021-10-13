@@ -118,7 +118,7 @@ def decode_landmarks(heatmaps, gamma=1.0, radius=0.1):
     heatmaps = heatmaps.clamp_min(0.0)
     if gamma != 1.0:
         heatmaps = heatmaps.pow(gamma)
-    m00s = heatmaps.sum(dim=(2, 3))
+    m00s = heatmaps.sum(dim=(2, 3)).clamp_min(torch.finfo(heatmaps.dtype).eps)
     xs = heatmaps.sum(dim=2).mul(x_indices).sum(dim=2).div(m00s)
     ys = heatmaps.sum(dim=3).mul(y_indices).sum(dim=2).div(m00s)
 

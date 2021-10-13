@@ -1,3 +1,4 @@
+import torch
 import sklearn
 import numpy as np
 from utils import decode_landmarks
@@ -26,6 +27,7 @@ def evaluate_model(model, data_loader, threshold, norm_by_face_height=False, use
         else:
             # Normalise by IOD
             norm_factors = (landmarks[:, 45] - landmarks[:, 36]).norm(dim=-1)
+        norm_factors.clamp_min(torch.finfo(norm_factors.dtype).eps)
         normalised_errors = errors / norm_factors
         errors = normalised_errors.detach().cpu().numpy().tolist()
         if use_sample_weight:
@@ -39,16 +41,21 @@ def evaluate_model(model, data_loader, threshold, norm_by_face_height=False, use
         pbar.close()
 
     # Compute AUC
-    sorted_errors = np.array(sorted(all_errors))
-    ticks = np.arange(1, len(all_errors) + 1) / len(all_errors)
-    truncated_errors = sorted_errors[sorted_errors <= threshold]
-    truncated_ticks = ticks[:len(truncated_errors)]
-    if truncated_errors[-1] < threshold and len(truncated_errors) < len(sorted_errors):
-        next_err = sorted_errors[len(truncated_errors)]
-        truncated_ticks = np.append(truncated_ticks,
-                                    truncated_ticks[-1] + (threshold - truncated_errors[-1]) /
-                                    (next_err - truncated_errors[-1]) / len(all_errors))
-        truncated_errors = np.append(truncated_errors, threshold)
-    auc_metric = sklearn.metrics.auc(truncated_errors, truncated_ticks) / truncated_errors[-1]
+    auc_metric = 0.0
+    sorted_errors = np.array([0] + sorted(all_errors))
+    ticks = np.arange(0, len(all_errors) + 1) / max(1, len(all_errors))
+    if threshold > 0:
+        truncated_errors = sorted_errors[sorted_errors <= threshold]
+        truncated_ticks = ticks[:len(truncated_errors)]
+        if truncated_errors[-1] < threshold:
+            if len(truncated_errors) < len(sorted_errors):
+                next_err = sorted_errors[len(truncated_errors)]
+                truncated_ticks = np.append(truncated_ticks,
+                                            truncated_ticks[-1] + (threshold - truncated_errors[-1]) /
+                                            (next_err - truncated_errors[-1]) / len(all_errors))
+            else:
+                truncated_ticks = np.append(truncated_ticks, truncated_ticks[-1])
+            truncated_errors = np.append(truncated_errors, threshold)
+        auc_metric = sklearn.metrics.auc(truncated_errors, truncated_ticks) / truncated_errors[-1]
 
     return auc_metric, sorted_errors, ticks
