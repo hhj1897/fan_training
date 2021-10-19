@@ -1,16 +1,19 @@
 import sklearn
 import numpy as np
 from utils import decode_landmarks
+from losses import heatmap_mse_loss, landmark_distance_loss
 
 
-__all__ = ['run_model_to_compute_errors', 'compute_auc']
+__all__ = ['run_model_to_compute_errors', 'compute_auc', 'compute_accuracy']
 
 
-def run_model_to_compute_errors(model, data_loader, pbar=None):
-    all_errors = {'heatmap_errors': np.array([]), 'losses': np.array([]), 'point_errors': np.array([]),
+def run_model_to_compute_errors(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
+    all_errors = {'heatmap_mse_losses': np.array([]), 'landmark_distance_losses': np.array([]),
+                  'heatmap_errors': np.array([]), 'landmark_errors': np.array([]),
                   'iods': np.array([]), 'face_heights': np.array([]), 'sample_weights': np.array([])}
     if pbar is not None:
         pbar.reset(total=len(data_loader))
+        pbar.refresh()
     device = next(model.parameters()).device
     was_training = model.training
     model.eval()
@@ -20,26 +23,35 @@ def run_model_to_compute_errors(model, data_loader, pbar=None):
         landmarks = landmarks.to(device)
 
         # Predict heatmaps
-        preds = model(images)
+        predicated_heatmaps = model(images)
+
+        # Compute heatmap mse loss (without reduction)
+        all_errors['heatmap_mse_losses'] = np.concatenate(
+            (all_errors['heatmap_mse_losses'],
+             heatmap_mse_loss(predicated_heatmaps, heatmaps, sample_weights=None).detach().cpu().numpy()))
+
+        # Compute landmark distance loss (normalised by face heights, without reduction)
+        all_errors['landmark_distance_losses'] = np.concatenate(
+            (all_errors['landmark_distance_losses'],
+             landmark_distance_loss(predicated_heatmaps, landmarks, images.shape,
+                                    sample_weights=None).detach().cpu().numpy()))
 
         # Compute heatmap errors
-        loss = ((preds[-1] - heatmaps) ** 2).mean(dim=(1, 2, 3))
-        all_errors['heatmap_errors'] = np.concatenate(
-            (all_errors['heatmap_errors'], loss.detach().cpu().numpy()))
+        htm_errors = ((predicated_heatmaps[-1] - heatmaps) ** 2).mean(dim=(-1, -2)).detach().cpu().numpy()
+        if all_errors['heatmap_errors'].shape[0] > 0:
+            all_errors['heatmap_errors'] = np.vstack((all_errors['heatmap_errors'], htm_errors))
+        else:
+            all_errors['heatmap_errors'] = htm_errors
 
-        # Compute MSE losses (with intermediate supervision)
-        for pred in preds[:-1]:
-            loss += ((pred - heatmaps) ** 2).mean(dim=(1, 2, 3))
-        loss /= len(preds)
-        all_errors['losses'] = np.concatenate((all_errors['losses'], loss.detach().cpu().numpy()))
-
-        # Compute points errors
-        predicted_landmarks = decode_landmarks(preds[-1])[0]
-        predicted_landmarks[..., 0] *= images.shape[-1] / preds[-1].shape[-1]
-        predicted_landmarks[..., 1] *= images.shape[-2] / preds[-1].shape[-2]
-        all_errors['point_errors'] = np.concatenate(
-            (all_errors['point_errors'],
-             ((predicted_landmarks - landmarks).norm(dim=-1)).mean(dim=-1).detach().cpu().numpy()))
+        # Compute landmark errors
+        predicted_landmarks = decode_landmarks(predicated_heatmaps[-1], gamma=gamma, radius=radius)[0]
+        predicted_landmarks[..., 0] *= images.shape[-1] / predicated_heatmaps[-1].shape[-1]
+        predicted_landmarks[..., 1] *= images.shape[-2] / predicated_heatmaps[-1].shape[-2]
+        lmk_errors = (predicted_landmarks - landmarks).norm(dim=-1).detach().cpu().numpy()
+        if all_errors['landmark_errors'].shape[0] > 0:
+            all_errors['landmark_errors'] = np.vstack((all_errors['landmark_errors'], lmk_errors))
+        else:
+            all_errors['landmark_errors'] = lmk_errors
 
         # Compute IODs
         all_errors['iods'] = np.concatenate(
@@ -57,11 +69,10 @@ def run_model_to_compute_errors(model, data_loader, pbar=None):
 
         if pbar is not None:
             pbar.update(1)
+            pbar.refresh()
 
     if was_training:
         model.train()
-    if pbar is not None:
-        pbar.close()
     return all_errors
 
 
@@ -91,3 +102,14 @@ def compute_auc(all_errors, threshold, sample_weights=None):
         auc_metric = sklearn.metrics.auc(truncated_errors, truncated_ticks) / truncated_errors[-1]
 
     return auc_metric, sorted_errors, ticks
+
+
+def compute_accuracy(landmark_errors, threshold, sample_weights=None):
+    if sample_weights is not None:
+        sample_weights = np.array(sample_weights, dtype=landmark_errors.dtype)
+        if sample_weights.ndim < landmark_errors.ndim:
+            sample_weights = np.expand_dims(sample_weights, np.arange(sample_weights.ndim, landmark_errors.ndim))
+        return np.mean((landmark_errors <= threshold) * sample_weights) / np.clip(
+            sample_weights.mean(), np.finfo(sample_weights.dtype).eps, None)
+    else:
+        return np.mean(landmark_errors <= threshold)
