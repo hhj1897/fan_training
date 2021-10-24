@@ -3,7 +3,8 @@ import numpy as np
 from copy import deepcopy
 
 
-__all__ = ['load_pts', 'save_pts', 'flip_landmarks', 'flip_heatmaps', 'encode_landmarks', 'decode_landmarks']
+__all__ = ['load_pts', 'save_pts', 'get_iods', 'get_bbox_sizes', 'flip_landmarks', 'flip_heatmaps',
+           'encode_landmarks', 'decode_landmarks', 'get_iods', 'get_bbox_sizes', ]
 
 
 def load_pts(pts_path, one_based=True):
@@ -31,6 +32,20 @@ def save_pts(pts_path, landmarks, one_based=True):
         for landmark in landmarks:
             f.write(' '.join([f'{x + (1 if one_based else 0):.6f}' for x in landmark]) + '\n')
         f.write('}')
+
+
+def get_iods(landmarks):
+    return sum([(landmarks[..., 45, idx] - landmarks[..., 36, idx]) ** 2
+                for idx in range(landmarks.shape[-1])]) ** 0.5
+
+
+def get_bbox_sizes(bbox_corners):
+    bbox_widths = sum([(bbox_corners[..., 1, idx] - bbox_corners[..., 0, idx]) ** 2
+                       for idx in range(bbox_corners.shape[-1])]) ** 0.5
+    bbox_heights = sum([(bbox_corners[..., 2, idx] - bbox_corners[..., 1, idx]) ** 2
+                        for idx in range(bbox_corners.shape[-1])]) ** 0.5
+    bbox_sizes = (bbox_widths * bbox_heights) ** 0.5
+    return bbox_sizes, bbox_widths, bbox_heights
 
 
 def flip_landmarks(landmarks, im_width):

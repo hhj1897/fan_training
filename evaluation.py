@@ -5,7 +5,7 @@ from utils import flip_heatmaps, decode_landmarks
 from losses import heatmap_mse_loss, landmark_distance_loss
 
 
-__all__ = ['run_model', 'get_iods', 'get_bbox_sizes', 'compute_landmark_errors', 'compute_auc', 'compute_accuracy']
+__all__ = ['run_model', 'compute_landmark_errors', 'compute_auc', 'compute_accuracy']
 
 
 def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
@@ -25,8 +25,9 @@ def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
         landmarks = landmarks.to(device)
 
         # Predict heatmaps
-        predicted_heatmaps = model(images)
-        predicted_heatmaps2 = [flip_heatmaps(htm) for htm in model(images.flip(-1))]
+        all_predicted_heatmaps = model(torch.cat((images, images.flip(-1))))
+        predicted_heatmaps = [htm[:images.shape[0]] for htm in all_predicted_heatmaps]
+        predicted_heatmaps2 = [flip_heatmaps(htm[images.shape[0]:]) for htm in all_predicted_heatmaps]
 
         # Compute heatmap mse loss (without reduction)
         htm_mse_losses = torch.stack(
@@ -106,17 +107,6 @@ def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
     if was_training:
         model.train()
     return results
-
-
-def get_iods(landmarks):
-    return np.linalg.norm(landmarks[..., 45, :] - landmarks[..., 36, :], axis=-1)
-
-
-def get_bbox_sizes(bbox_corners):
-    bbox_widths = np.linalg.norm(bbox_corners[..., 1, :] - bbox_corners[..., 0, :], axis=-1)
-    bbox_heights = np.linalg.norm(bbox_corners[..., 2, :] - bbox_corners[..., 1, :], axis=-1)
-    bbox_sizes = (bbox_widths * bbox_heights) ** 0.5
-    return bbox_sizes, bbox_widths, bbox_heights
 
 
 def compute_landmark_errors(predicted_landmarks, landmarks):

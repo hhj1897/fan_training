@@ -7,7 +7,10 @@ import albumentations as augs
 from types import SimpleNamespace
 from torch.utils.data import Dataset
 
-from utils import load_pts, flip_landmarks, encode_landmarks
+from utils import *
+
+
+___all___ = ['LandmarkDataset']
 
 
 class LandmarkDataset(Dataset):
@@ -60,7 +63,7 @@ class LandmarkDataset(Dataset):
             elif split == 'val':
                 return [('helen', 'testset'), ('ibug', ''), ('lfpw', 'testset')]
             elif split == 'test':
-                return [('300W', '01_Indoor'), ('300W', '01_Outdoor')]
+                return [('300W', '01_Indoor'), ('300W', '02_Outdoor')]
             else:
                 raise ValueError(f"{split} must be set to either train, val, or test.")
         elif dataset == '300w_lp':
@@ -69,7 +72,7 @@ class LandmarkDataset(Dataset):
             elif split == 'val':
                 return [('helen', 'testset'), ('ibug', ''), ('lfpw', 'testset')]
             elif split == 'test':
-                return [('300W', '01_Indoor'), ('300W', '01_Outdoor')]
+                return [('300W', '01_Indoor'), ('300W', '02_Outdoor')]
             else:
                 raise ValueError(f"{split} must be set to either train, val, or test.")
         else:
