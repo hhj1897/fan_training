@@ -1,71 +1,103 @@
+import torch
 import sklearn
 import numpy as np
-from utils import decode_landmarks
+from utils import flip_heatmaps, decode_landmarks
 from losses import heatmap_mse_loss, landmark_distance_loss
 
 
-__all__ = ['run_model_to_compute_errors', 'compute_auc', 'compute_accuracy']
+__all__ = ['run_model', 'get_iods', 'get_bbox_sizes', 'compute_landmark_errors', 'compute_auc', 'compute_accuracy']
 
 
-def run_model_to_compute_errors(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
-    all_errors = {'heatmap_mse_losses': np.array([]), 'landmark_distance_losses': np.array([]),
-                  'heatmap_errors': np.array([]), 'landmark_errors': np.array([]),
-                  'iods': np.array([]), 'face_heights': np.array([]), 'sample_weights': np.array([])}
+def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
+    results = {'heatmap_mse_losses': np.array([]), 'landmark_distance_losses': np.array([]),
+               'heatmap_errors': np.array([]), 'predicted_landmarks': np.array([]), 'landmark_scores': np.array([]),
+               'landmarks': np.array([]), 'face_corners': np.array([]), 'landmark_bbox_corners': np.array([]),
+               'sample_weights': np.array([])}
     if pbar is not None:
         pbar.reset(total=len(data_loader))
         pbar.refresh()
     device = next(model.parameters()).device
     was_training = model.training
     model.eval()
-    for images, heatmaps, landmarks, face_corners, metadata in data_loader:
+    for images, heatmaps, landmarks, face_corners, landmark_bbox_corners, metadata in data_loader:
         images = images.to(device)
         heatmaps = heatmaps.to(device)
         landmarks = landmarks.to(device)
 
         # Predict heatmaps
-        predicated_heatmaps = model(images)
+        predicted_heatmaps = model(images)
+        predicted_heatmaps2 = [flip_heatmaps(htm) for htm in model(images.flip(-1))]
 
         # Compute heatmap mse loss (without reduction)
-        all_errors['heatmap_mse_losses'] = np.concatenate(
-            (all_errors['heatmap_mse_losses'],
-             heatmap_mse_loss(predicated_heatmaps, heatmaps, sample_weights=None).detach().cpu().numpy()))
+        htm_mse_losses = torch.stack(
+            (heatmap_mse_loss(predicted_heatmaps, heatmaps, reduce=False),
+             heatmap_mse_loss(predicted_heatmaps2, heatmaps, reduce=False)),
+            dim=1).detach().cpu().numpy()
+        if results['heatmap_mse_losses'].shape[0] > 0:
+            results['heatmap_mse_losses'] = np.concatenate((results['heatmap_mse_losses'], htm_mse_losses))
+        else:
+            results['heatmap_mse_losses'] = htm_mse_losses
 
         # Compute landmark distance loss (normalised by face heights, without reduction)
-        all_errors['landmark_distance_losses'] = np.concatenate(
-            (all_errors['landmark_distance_losses'],
-             landmark_distance_loss(predicated_heatmaps, landmarks, images.shape,
-                                    sample_weights=None).detach().cpu().numpy()))
+        lmk_dist_losses = torch.stack(
+            (landmark_distance_loss(predicted_heatmaps, landmarks, images.shape, reduce=None),
+             landmark_distance_loss(predicted_heatmaps2, landmarks, images.shape, reduce=None)),
+            dim=1).detach().cpu().numpy()
+        if results['landmark_distance_losses'].shape[0] > 0:
+            results['landmark_distance_losses'] = np.concatenate(
+                (results['landmark_distance_losses'], lmk_dist_losses))
+        else:
+            results['landmark_distance_losses'] = lmk_dist_losses
 
         # Compute heatmap errors
-        htm_errors = ((predicated_heatmaps[-1] - heatmaps) ** 2).mean(dim=(-1, -2)).detach().cpu().numpy()
-        if all_errors['heatmap_errors'].shape[0] > 0:
-            all_errors['heatmap_errors'] = np.vstack((all_errors['heatmap_errors'], htm_errors))
+        htm_errors = torch.stack(
+            (((predicted_heatmaps[-1] - heatmaps) ** 2).mean(dim=(-1, -2)),
+             ((predicted_heatmaps2[-1] - heatmaps) ** 2).mean(dim=(-1, -2))),
+            dim=1).detach().cpu().numpy()
+        if results['heatmap_errors'].shape[0] > 0:
+            results['heatmap_errors'] = np.concatenate((results['heatmap_errors'], htm_errors))
         else:
-            all_errors['heatmap_errors'] = htm_errors
+            results['heatmap_errors'] = htm_errors
 
-        # Compute landmark errors
-        predicted_landmarks = decode_landmarks(predicated_heatmaps[-1], gamma=gamma, radius=radius)[0]
-        predicted_landmarks[..., 0] *= images.shape[-1] / predicated_heatmaps[-1].shape[-1]
-        predicted_landmarks[..., 1] *= images.shape[-2] / predicated_heatmaps[-1].shape[-2]
-        lmk_errors = (predicted_landmarks - landmarks).norm(dim=-1).detach().cpu().numpy()
-        if all_errors['landmark_errors'].shape[0] > 0:
-            all_errors['landmark_errors'] = np.vstack((all_errors['landmark_errors'], lmk_errors))
+        # Predict landmarks
+        lmk, scores = decode_landmarks(predicted_heatmaps[-1], gamma=gamma, radius=radius)
+        lmk2, scores2 = decode_landmarks(predicted_heatmaps2[-1], gamma=gamma, radius=radius)
+        predicted_landmarks = torch.stack((lmk, lmk2), dim=1)
+        predicted_landmarks[..., 0] *= images.shape[-1] / predicted_heatmaps[-1].shape[-1]
+        predicted_landmarks[..., 1] *= images.shape[-2] / predicted_heatmaps[-1].shape[-2]
+        predicted_landmarks = predicted_landmarks.detach().cpu().numpy()
+        if results['predicted_landmarks'].shape[0] > 0:
+            results['predicted_landmarks'] = np.concatenate((results['predicted_landmarks'], predicted_landmarks))
         else:
-            all_errors['landmark_errors'] = lmk_errors
+            results['predicted_landmarks'] = predicted_landmarks
+        landmark_scores = torch.stack((scores, scores2), dim=1).detach().cpu().numpy()
+        if results['landmark_scores'].shape[0] > 0:
+            results['landmark_scores'] = np.concatenate((results['landmark_scores'], landmark_scores))
+        else:
+            results['landmark_scores'] = landmark_scores
 
-        # Compute IODs
-        all_errors['iods'] = np.concatenate(
-            (all_errors['iods'],
-             (landmarks[:, 45] - landmarks[:, 36]).norm(dim=-1).detach().cpu().numpy()))
+        # Record landmarks
+        if results['landmarks'].shape[0] > 0:
+            results['landmarks'] = np.concatenate((results['landmarks'], landmarks.detach().cpu().numpy()))
+        else:
+            results['landmarks'] = landmarks.detach().cpu().numpy()
 
-        # Compute face heights
-        all_errors['face_heights'] = np.concatenate(
-            (all_errors['face_heights'],
-             (face_corners[:, 2] - face_corners[:, 1]).norm(dim=-1).detach().cpu().numpy()))
+        # Record face corners
+        if results['face_corners'].shape[0] > 0:
+            results['face_corners'] = np.concatenate((results['face_corners'], face_corners.detach().cpu().numpy()))
+        else:
+            results['face_corners'] = face_corners.detach().cpu().numpy()
+
+        # Record landmark bounding box corners
+        if results['landmark_bbox_corners'].shape[0] > 0:
+            results['landmark_bbox_corners'] = np.concatenate(
+                (results['landmark_bbox_corners'], landmark_bbox_corners.detach().cpu().numpy()))
+        else:
+            results['landmark_bbox_corners'] = landmark_bbox_corners.detach().cpu().numpy()
 
         # Record sample weights
-        all_errors['sample_weights'] = np.concatenate(
-            (all_errors['sample_weights'], metadata['weight'].detach().cpu().numpy()))
+        results['sample_weights'] = np.concatenate(
+            (results['sample_weights'], metadata['weight'].detach().cpu().numpy()))
 
         if pbar is not None:
             pbar.update(1)
@@ -73,20 +105,50 @@ def run_model_to_compute_errors(model, data_loader, pbar=None, gamma=1.0, radius
 
     if was_training:
         model.train()
-    return all_errors
+    return results
 
 
-def compute_auc(all_errors, threshold, sample_weights=None):
+def get_iods(landmarks):
+    return np.linalg.norm(landmarks[..., 45, :] - landmarks[..., 36, :], axis=-1)
+
+
+def get_bbox_sizes(bbox_corners):
+    bbox_widths = np.linalg.norm(bbox_corners[..., 1, :] - bbox_corners[..., 0, :], axis=-1)
+    bbox_heights = np.linalg.norm(bbox_corners[..., 2, :] - bbox_corners[..., 1, :], axis=-1)
+    bbox_sizes = (bbox_widths * bbox_heights) ** 0.5
+    return bbox_sizes, bbox_widths, bbox_heights
+
+
+def compute_landmark_errors(predicted_landmarks, landmarks):
+    if landmarks.ndim < predicted_landmarks.ndim:
+        landmarks = np.expand_dims(landmarks, tuple(range(1, 1 + predicted_landmarks.ndim - landmarks.ndim)))
+    return np.linalg.norm(predicted_landmarks - landmarks, axis=-1)
+
+
+def compute_auc(landmark_errors, threshold, normalisation_factors=None, sample_weights=None, reduction_axis=-1):
+    if landmark_errors.ndim > 1 and reduction_axis is not None:
+        landmark_errors = landmark_errors.mean(axis=reduction_axis)
+    if normalisation_factors is not None:
+        normalisation_factors = np.clip(normalisation_factors, np.finfo(landmark_errors.dtype).eps, None)
+        if normalisation_factors.ndim < landmark_errors.ndim:
+            normalisation_factors = np.expand_dims(normalisation_factors,
+                                                   tuple(range(normalisation_factors.ndim, landmark_errors.ndim)))
+        landmark_errors = landmark_errors / normalisation_factors
     if sample_weights is not None:
         resampled_errors = []
-        for error, weight in zip(all_errors, sample_weights):
-            resampled_errors += [error] * max(1, int(weight))
-        all_errors = resampled_errors
+        for error, weight in zip(landmark_errors, sample_weights):
+            if error.ndim > 0:
+                resampled_errors += error.flatten().tolist() * max(1, int(weight))
+            else:
+                resampled_errors += [error] * max(1, int(weight))
+        landmark_errors = resampled_errors
+    else:
+        landmark_errors = landmark_errors.flatten()
 
     # Compute AUC
     auc_metric = 0.0
-    sorted_errors = np.array([0] + sorted(all_errors))
-    ticks = np.arange(0, len(all_errors) + 1) / max(1, len(all_errors))
+    sorted_errors = np.array([0] + sorted(landmark_errors))
+    ticks = np.arange(0, len(landmark_errors) + 1) / max(1, len(landmark_errors))
     if threshold > 0:
         truncated_errors = sorted_errors[sorted_errors <= threshold]
         truncated_ticks = ticks[:len(truncated_errors)]
@@ -95,7 +157,7 @@ def compute_auc(all_errors, threshold, sample_weights=None):
                 next_err = sorted_errors[len(truncated_errors)]
                 truncated_ticks = np.append(truncated_ticks,
                                             truncated_ticks[-1] + (threshold - truncated_errors[-1]) /
-                                            (next_err - truncated_errors[-1]) / len(all_errors))
+                                            (next_err - truncated_errors[-1]) / len(landmark_errors))
             else:
                 truncated_ticks = np.append(truncated_ticks, truncated_ticks[-1])
             truncated_errors = np.append(truncated_errors, threshold)
@@ -104,11 +166,17 @@ def compute_auc(all_errors, threshold, sample_weights=None):
     return auc_metric, sorted_errors, ticks
 
 
-def compute_accuracy(landmark_errors, threshold, sample_weights=None):
+def compute_accuracy(landmark_errors, threshold, normalisation_factors=None, sample_weights=None):
+    if normalisation_factors is not None:
+        normalisation_factors = np.clip(normalisation_factors, np.finfo(landmark_errors.dtype).eps, None)
+        if normalisation_factors.ndim < landmark_errors.ndim:
+            normalisation_factors = np.expand_dims(normalisation_factors,
+                                                   tuple(range(normalisation_factors.ndim, landmark_errors.ndim)))
+        landmark_errors = landmark_errors / normalisation_factors
     if sample_weights is not None:
         sample_weights = np.array(sample_weights, dtype=landmark_errors.dtype)
         if sample_weights.ndim < landmark_errors.ndim:
-            sample_weights = np.expand_dims(sample_weights, np.arange(sample_weights.ndim, landmark_errors.ndim))
+            sample_weights = np.expand_dims(sample_weights, tuple(range(sample_weights.ndim, landmark_errors.ndim)))
         return np.mean((landmark_errors <= threshold) * sample_weights) / np.clip(
             sample_weights.mean(), np.finfo(sample_weights.dtype).eps, None)
     else:

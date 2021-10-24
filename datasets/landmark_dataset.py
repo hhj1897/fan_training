@@ -21,7 +21,7 @@ class LandmarkDataset(Dataset):
                 fields = line.split('\t')
                 subset, split = fields[:2]
                 if (subset, split) in partitions:
-                    weight = np.ceil(5 * 0.8 ** int(fields[2]))
+                    weight = np.ceil(5 * 0.8 ** int(fields[2])) if int(fields[2]) >= 0 else 1.0
                     self.weight_norm += weight
                     im_path, pts_path = fields[3:5]
                     if not os.path.isabs(im_path):
@@ -86,13 +86,18 @@ class LandmarkDataset(Dataset):
         # Random flip needs to be handled manually
         im_hight, im_width = image.shape[:2]
         face_box = self._samples[item]['face_box']
+        landmark_bbox = np.vstack((landmarks.min(axis=0), landmarks.max(axis=0)))
         if self.random_flip and random.random() < 0.5:
             landmarks = flip_landmarks(landmarks, im_width)
             face_box = np.array([[im_width - face_box[1, 0], face_box[0, 1]],
                                  [im_width - face_box[0, 0], face_box[1, 1]]])
+            landmark_bbox = np.array([[im_width - landmark_bbox[1, 0], landmark_bbox[0, 1]],
+                                      [im_width - landmark_bbox[0, 0], landmark_bbox[1, 1]]])
             image = cv2.flip(image, 1)
         face_corners = np.array([face_box[0], [face_box[1, 0], face_box[0, 1]],
                                  face_box[1], [face_box[0, 0], face_box[1, 1]]])
+        landmark_bbox_corners = np.array([landmark_bbox[0], [landmark_bbox[1, 0], landmark_bbox[0, 1]],
+                                          landmark_bbox[1], [landmark_bbox[0, 0], landmark_bbox[1, 1]]])
 
         face_centre = face_box.mean(axis=0)
         face_size = (face_box[1] - face_box[0]).mean()
@@ -109,20 +114,21 @@ class LandmarkDataset(Dataset):
                  augs.Resize(int(np.round(self.config.image_size * (1 + self.config.temp_padding_factor))),
                              int(np.round(self.config.image_size * (1 + self.config.temp_padding_factor))))])
 
-            # Add other data augmentation transforms
+            # Add other geometric transforms
             all_transforms = [crop_trans]
             if self.geometric_transform is not None:
                 all_transforms.append(self.geometric_transform)
             all_transforms.append(augs.CenterCrop(self.config.image_size, self.config.image_size))
-            if self.content_transform is not None:
-                all_transforms.append(self.content_transform)
             composite_trans = augs.Compose(all_transforms, keypoint_params=keypoint_params)
 
             # Transform the image and the landmarks
-            trans_res = composite_trans(image=image, keypoints=np.vstack((landmarks, face_corners)))
+            trans_res = composite_trans(image=image, keypoints=np.vstack((landmarks, face_corners,
+                                                                          landmark_bbox_corners)))
             image, warped_keypoints = trans_res['image'], trans_res['keypoints']
             landmarks = np.array(warped_keypoints[:landmarks.shape[0]])
-            face_corners = np.array(warped_keypoints[-face_corners.shape[0]:])
+            face_corners = np.array(warped_keypoints[-face_corners.shape[0] - landmark_bbox_corners.shape[0]:
+                                                     -landmark_bbox_corners.shape[0]])
+            landmark_bbox_corners = np.array(warped_keypoints[-landmark_bbox_corners.shape[0]:])
 
             # Create the label heatmaps
             heatmaps = encode_landmarks(landmarks / self.config.image_size * self.config.heatmap_size,
@@ -138,10 +144,13 @@ class LandmarkDataset(Dataset):
             crop_trans = augs.Compose([augs.CropAndPad(crop_margin, pad_mode=cv2.BORDER_CONSTANT),
                                        augs.Resize(self.config.image_size, self.config.image_size)],
                                       keypoint_params=keypoint_params)
-            crop_res = crop_trans(image=image, keypoints=np.vstack((landmarks, face_corners)))
+            crop_res = crop_trans(image=image, keypoints=np.vstack((landmarks, face_corners,
+                                                                    landmark_bbox_corners)))
             image, warped_keypoints = crop_res['image'], crop_res['keypoints']
             landmarks = np.array(warped_keypoints[:landmarks.shape[0]])
-            face_corners = np.array(warped_keypoints[-face_corners.shape[0]:])
+            face_corners = np.array(warped_keypoints[-face_corners.shape[0] - landmark_bbox_corners.shape[0]:
+                                                     -landmark_bbox_corners.shape[0]])
+            landmark_bbox_corners = np.array(warped_keypoints[-landmark_bbox_corners.shape[0]:])
 
             # Create the label heatmaps
             heatmaps = encode_landmarks(landmarks / self.config.image_size * self.config.heatmap_size,
@@ -158,10 +167,13 @@ class LandmarkDataset(Dataset):
                     keypoint_params=keypoint_params)
 
                 # Apply the composite geometric transform to the image and the landmarks
-                trans_res = composite_trans(image=image, keypoints=np.vstack((landmarks, face_corners)))
+                trans_res = composite_trans(image=image, keypoints=np.vstack((landmarks, face_corners,
+                                                                              landmark_bbox_corners)))
                 image, warped_keypoints = trans_res['image'], trans_res['keypoints']
                 landmarks = np.array(warped_keypoints[:landmarks.shape[0]])
-                face_corners = np.array(warped_keypoints[-face_corners.shape[0]:])
+                face_corners = np.array(warped_keypoints[-face_corners.shape[0] - landmark_bbox_corners.shape[0]:
+                                                         -landmark_bbox_corners.shape[0]])
+                landmark_bbox_corners = np.array(warped_keypoints[-landmark_bbox_corners.shape[0]:])
 
                 # Apply the same transform to the heatmaps
                 heatmaps = augs.resize(heatmaps.numpy().transpose(1, 2, 0),
@@ -171,11 +183,12 @@ class LandmarkDataset(Dataset):
                                        self.config.heatmap_size, self.config.heatmap_size)
                 heatmaps = torch.from_numpy(heatmaps.transpose(2, 0, 1))
 
-            # Apply the content transform to the image
-            if self.content_transform is not None:
-                image = self.content_transform(image=image)['image']
+        # Apply the content transform to the image
+        if self.content_transform is not None:
+            image = self.content_transform(image=image)['image']
 
         # Image to tensor
         image = torch.from_numpy(image.astype(np.float32).transpose((2, 0, 1))).div_(255)
 
-        return image, heatmaps, torch.from_numpy(landmarks), torch.from_numpy(face_corners), self._samples[item]
+        return (image, heatmaps, torch.from_numpy(landmarks), torch.from_numpy(face_corners),
+                torch.from_numpy(landmark_bbox_corners), self._samples[item])

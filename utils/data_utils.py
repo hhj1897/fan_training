@@ -3,7 +3,7 @@ import numpy as np
 from copy import deepcopy
 
 
-__all__ = ['load_pts', 'save_pts', 'flip_landmarks', 'encode_landmarks', 'decode_landmarks']
+__all__ = ['load_pts', 'save_pts', 'flip_landmarks', 'flip_heatmaps', 'encode_landmarks', 'decode_landmarks']
 
 
 def load_pts(pts_path, one_based=True):
@@ -39,13 +39,30 @@ def flip_landmarks(landmarks, im_width):
                  [38, 43], [39, 42], [41, 46], [40, 47], [31, 35], [32, 34], [50, 52],
                  [49, 53], [48, 54], [60, 64], [61, 63], [67, 65], [59, 55], [58, 56])
 
-    result = deepcopy(landmarks)
+    if landmarks is torch.Tensor:
+        result = landmarks.clone()
+    else:
+        result = deepcopy(landmarks)
     for cur_pair in pts_pairs:
-        result[cur_pair[0], :] = landmarks[cur_pair[1]]
-        result[cur_pair[1], :] = landmarks[cur_pair[0]]
-    result[:, 0] = im_width - result[:, 0]
+        result[..., cur_pair[0], :] = landmarks[..., cur_pair[1], :]
+        result[..., cur_pair[1], :] = landmarks[..., cur_pair[0], :]
+    result[..., 0] = im_width - result[..., 0]
 
     return result
+
+
+def flip_heatmaps(heatmaps):
+    pts_pairs = ([0, 16], [1, 15], [2, 14], [3, 13], [4, 12], [5, 11], [6, 10], [7, 9],
+                 [17, 26], [18, 25], [19, 24], [20, 23], [21, 22], [36, 45], [37, 44],
+                 [38, 43], [39, 42], [41, 46], [40, 47], [31, 35], [32, 34], [50, 52],
+                 [49, 53], [48, 54], [60, 64], [61, 63], [67, 65], [59, 55], [58, 56])
+
+    result = heatmaps.clone()
+    for cur_pair in pts_pairs:
+        result[..., cur_pair[0], :, :] = heatmaps[..., cur_pair[1], :, :]
+        result[..., cur_pair[1], :, :] = heatmaps[..., cur_pair[0], :, :]
+
+    return result.flip(-1)
 
 
 def encode_landmarks(landmarks, heatmap_width, heatmap_height, gaussian_size, sigma, use_subpixel_sampling=True):
