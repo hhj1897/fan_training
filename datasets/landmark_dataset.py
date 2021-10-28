@@ -15,7 +15,7 @@ ___all___ = ['LandmarkDataset']
 
 class LandmarkDataset(Dataset):
     def __init__(self, tsv_path, partitions, config=None, random_flip=False,
-                 geometric_transform=None, content_transform=None):
+                 geometric_transform=None, content_transform=None, keep_invalid_samples=False):
         self._samples = []
         self.weight_norm = 0.0
         tsv_folder = os.path.dirname(tsv_path)
@@ -31,11 +31,14 @@ class LandmarkDataset(Dataset):
                         im_path = os.path.abspath(os.path.join(tsv_folder, im_path))
                     if not os.path.isabs(pts_path):
                         pts_path = os.path.abspath(os.path.join(tsv_folder, pts_path))
+                    if not keep_invalid_samples and (not os.path.exists(im_path) or not os.path.exists(pts_path)):
+                        continue
                     face_box = np.array([float(x) for x in fields[5:9]]).reshape((-1, 2))
                     self._samples.append({'subset': subset, 'split': split, 'weight': weight,
                                           'im_path': im_path, 'pts_path': pts_path,
                                           'face_box': face_box})
-        self.weight_norm /= len(self._samples)
+        if len(self._samples) > 0:
+            self.weight_norm /= len(self._samples)
         if config is None:
             self.config = LandmarkDataset.create_config()
         else:

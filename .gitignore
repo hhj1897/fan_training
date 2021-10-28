@@ -9,3 +9,4 @@ data/300w
 data/300w_lp
 checkpoints
 logs
+untracked*
