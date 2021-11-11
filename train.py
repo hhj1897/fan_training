@@ -15,7 +15,7 @@ __all__ = ['train_model']
 def compute_losses(predicted_heatmaps, heatmaps, landmarks, image_shape, lmk_bbox_corners,
                    sample_weights=None, htm_mse_loss_weight=1.0, lmk_dist_loss_weight=0.0,
                    lmk_dist_loss_gamma=1.0, lmk_dist_loss_radius=0.1, reduce=True,
-                   force_to_compute_all_losses=True):
+                   force_to_compute_all_losses=False):
 
     # Compute the heatmap MSE loss
     if force_to_compute_all_losses or htm_mse_loss_weight > 0:
@@ -56,8 +56,7 @@ def fgsm_attack(model, images, heatmaps, landmarks, lmk_bbox_corners, epsilon,
     predicted_heatmaps = model(images + delta)
     total_loss, _, _ = compute_losses(predicted_heatmaps[-1], heatmaps, landmarks, images.shape,
                                       lmk_bbox_corners, None, htm_mse_loss_weight, lmk_dist_loss_weight,
-                                      lmk_dist_loss_gamma, lmk_dist_loss_radius,
-                                      force_to_compute_all_losses=False)
+                                      lmk_dist_loss_gamma, lmk_dist_loss_radius)
     if isinstance(total_loss, torch.Tensor):
         total_loss.backward()
     if was_training:
@@ -76,8 +75,7 @@ def pgd_linf_attack(model, images, heatmaps, landmarks, lmk_bbox_corners, epsilo
         predicted_heatmaps = model((images + delta).clamp(0, 1))
         total_loss, _, _ = compute_losses(predicted_heatmaps[-1], heatmaps, landmarks, images.shape,
                                           lmk_bbox_corners, None, htm_mse_loss_weight, lmk_dist_loss_weight,
-                                          lmk_dist_loss_gamma, lmk_dist_loss_radius,
-                                          force_to_compute_all_losses=False)
+                                          lmk_dist_loss_gamma, lmk_dist_loss_radius)
         if isinstance(total_loss, torch.Tensor):
             total_loss.backward()
         delta = (delta + delta.grad.sign() * alpha).clamp(-epsilon, epsilon).detach()
@@ -132,7 +130,8 @@ def train_model(model, optimiser, train_data_loader, val_data_loader, num_epochs
             # Compute losses
             total_loss, htm_mse_loss, lmk_dist_loss = compute_losses(
                 predicted_heatmaps, heatmaps, landmarks, images.shape, lmk_bbox_corners, sample_weights,
-                htm_mse_loss_weight, lmk_dist_loss_weight, lmk_dist_loss_gamma, lmk_dist_loss_radius)
+                htm_mse_loss_weight, lmk_dist_loss_weight, lmk_dist_loss_gamma, lmk_dist_loss_radius,
+                force_to_compute_all_losses=True)
 
             # Add loss on adversarial examples
             adv_loss = None
@@ -143,8 +142,7 @@ def train_model(model, optimiser, train_data_loader, val_data_loader, num_epochs
                 adv_predicted_heatmaps = model(adv_images)
                 adv_loss, _, _ = compute_losses(
                     adv_predicted_heatmaps, heatmaps, landmarks, images.shape, lmk_bbox_corners, sample_weights,
-                    htm_mse_loss_weight, lmk_dist_loss_weight, lmk_dist_loss_gamma, lmk_dist_loss_radius,
-                    force_to_compute_all_losses=False)
+                    htm_mse_loss_weight, lmk_dist_loss_weight, lmk_dist_loss_gamma, lmk_dist_loss_radius)
                 total_loss = (total_loss + adv_loss * adv_loss_weight) / (1 + adv_loss_weight)
 
             # Update parameters
