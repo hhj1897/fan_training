@@ -8,6 +8,7 @@ from losses import heatmap_mse_loss, landmark_distance_loss
 __all__ = ['run_model', 'compute_landmark_errors', 'compute_auc', 'compute_accuracy']
 
 
+@torch.no_grad()
 def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
     results = {'heatmap_mse_losses': np.array([]), 'landmark_distance_losses': np.array([]),
                'heatmap_errors': np.array([]), 'predicted_landmarks': np.array([]), 'landmark_scores': np.array([]),
