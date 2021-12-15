@@ -1,5 +1,5 @@
 # FAN Training Code
-The PyTorch training code for [FAN](http://openaccess.thecvf.com/content_ICCV_2017/papers/Bulat_How_Far_Are_ICCV_2017_paper.pdf) \[1\]. It is adapted for thr authors' original [Lua version](https://github.com/1adrianb/face-alignment-training) but with several improvements:
+The PyTorch training code for [FAN](http://openaccess.thecvf.com/content_ICCV_2017/papers/Bulat_How_Far_Are_ICCV_2017_paper.pdf) \[1\]. It is adapted from the authors' original [Lua version](https://github.com/1adrianb/face-alignment-training) but with several improvements:
 1. We improved the "heatmap -> coordinate" inference algorithm. Instead of using `argmax` to get the coordinates, we compute the centroid in each heatmap as the predicted landmark coordinates. This change leads to more accurate results since the output no longer needs to snap to the integer grid. In addition, it also reduces jitter when processing consecutive frames in a video.
 2. We improved the data preprocessing and augmentation pipeline in a number of ways:
    1) The groundtruth heatmaps are now generated with sub-pixel sampling so that they are centred at the precise coordinates of the target landmarks (instead of having the coordinates to be snapped to the integer grid first).
