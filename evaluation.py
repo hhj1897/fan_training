@@ -40,7 +40,7 @@ def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
         else:
             results['heatmap_mse_losses'] = htm_mse_losses
 
-        # Compute landmark distance loss (normalised by face heights, without reduction)
+        # Compute landmark distance loss (without reduction)
         lmk_dist_losses = torch.stack(
             (landmark_distance_loss(predicted_heatmaps, landmarks, images.shape, reduce=None),
              landmark_distance_loss(predicted_heatmaps2, landmarks, images.shape, reduce=None)),
