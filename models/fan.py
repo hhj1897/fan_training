@@ -86,9 +86,9 @@ class HourGlass(nn.Module):
         up1 = self._modules['b1_' + str(level)](up1)
 
         if self.config.use_avg_pool:
-            low1 = F.avg_pool2d(inp, 2, stride=2)
+            low1 = F.avg_pool2d(inp, 2)
         else:
-            low1 = F.max_pool2d(inp, 2, stride=2)
+            low1 = F.max_pool2d(inp, 2)
         low1 = self._modules['b2_' + str(level)](low1)
 
         if level > 1:
@@ -117,7 +117,7 @@ class FAN(nn.Module):
             self.config = config
 
         # Stem
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=self.config.stem_conv_stride, padding=3)
         self.bn1 = nn.InstanceNorm2d(64) if self.config.use_instance_norm else nn.BatchNorm2d(64)
         self.conv2 = ConvBlock(64, 128, self.config.use_instance_norm)
         self.conv3 = ConvBlock(128, 128, self.config.use_instance_norm)
@@ -146,11 +146,12 @@ class FAN(nn.Module):
                                                                  kernel_size=1, stride=1, padding=0))
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)), True)
-        if self.config.use_avg_pool:
-            x = F.avg_pool2d(self.conv2(x), 2, stride=2)
-        else:
-            x = F.max_pool2d(self.conv2(x), 2, stride=2)
+        x = self.conv2(F.relu(self.bn1(self.conv1(x)), True))
+        if self.config.stem_pool_kernel_size > 1:
+            if self.config.use_avg_pool:
+                x = F.avg_pool2d(x, self.config.stem_pool_kernel_size)
+            else:
+                x = F.max_pool2d(x, self.config.stem_pool_kernel_size)
         x = self.conv3(x)
         x = self.conv4(x)
 
@@ -177,6 +178,8 @@ class FAN(nn.Module):
 
     @staticmethod
     def create_config(input_size=256, num_modules=2, hg_num_features=256, hg_depth=4,
-                      use_avg_pool=False, use_instance_norm=False):
+                      use_avg_pool=False, use_instance_norm=False, stem_conv_stride=2,
+                      stem_pool_kernel_size=2):
         return SimpleNamespace(input_size=input_size, num_modules=num_modules, hg_num_features=hg_num_features,
-                               hg_depth=hg_depth, use_avg_pool=use_avg_pool, use_instance_norm=use_instance_norm)
+                               hg_depth=hg_depth, use_avg_pool=use_avg_pool, use_instance_norm=use_instance_norm,
+                               stem_conv_stride=stem_conv_stride, stem_pool_kernel_size=stem_pool_kernel_size)
