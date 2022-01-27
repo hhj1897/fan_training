@@ -116,7 +116,7 @@ class LandmarkDataset(Dataset):
             crop_margin = (int(-crop_box_tl[1]), int(crop_box_br[0] - im_width),
                            int(crop_box_br[1] - im_hight), int(-crop_box_tl[0]))
             crop_trans = augs.Compose(
-                [augs.CropAndPad(crop_margin, pad_mode=cv2.BORDER_CONSTANT),
+                [augs.CropAndPad(crop_margin, pad_mode=cv2.BORDER_CONSTANT, keep_size=False),
                  augs.Resize(int(np.round(self.config.image_size * (1 + self.config.temp_padding_factor))),
                              int(np.round(self.config.image_size * (1 + self.config.temp_padding_factor))))])
 
@@ -147,7 +147,7 @@ class LandmarkDataset(Dataset):
             crop_box_br = crop_box_tl + np.round(crop_box_size) + 1
             crop_margin = (int(-crop_box_tl[1]), int(crop_box_br[0] - im_width),
                            int(crop_box_br[1] - im_hight), int(-crop_box_tl[0]))
-            crop_trans = augs.Compose([augs.CropAndPad(crop_margin, pad_mode=cv2.BORDER_CONSTANT),
+            crop_trans = augs.Compose([augs.CropAndPad(crop_margin, pad_mode=cv2.BORDER_CONSTANT, keep_size=False),
                                        augs.Resize(self.config.image_size, self.config.image_size)],
                                       keypoint_params=keypoint_params)
             crop_res = crop_trans(image=image, keypoints=np.vstack((landmarks, face_corners,
