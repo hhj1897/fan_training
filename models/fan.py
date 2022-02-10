@@ -117,7 +117,9 @@ class FAN(nn.Module):
             self.config = config
 
         # Stem
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=self.config.stem_conv_stride, padding=3)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=self.config.stem_conv_kernel_size,
+                               stride=self.config.stem_conv_stride,
+                               padding=self.config.stem_conv_kernel_size // 2)
         self.bn1 = nn.InstanceNorm2d(64) if self.config.use_instance_norm else nn.BatchNorm2d(64)
         self.conv2 = ConvBlock(64, 128, self.config.use_instance_norm)
         self.conv3 = ConvBlock(128, 128, self.config.use_instance_norm)
@@ -178,8 +180,9 @@ class FAN(nn.Module):
 
     @staticmethod
     def create_config(input_size=256, num_modules=2, hg_num_features=256, hg_depth=4,
-                      use_avg_pool=False, use_instance_norm=False, stem_conv_stride=2,
-                      stem_pool_kernel_size=2):
+                      use_avg_pool=False, use_instance_norm=False, stem_conv_kernel_size=7,
+                      stem_conv_stride=2, stem_pool_kernel_size=2):
         return SimpleNamespace(input_size=input_size, num_modules=num_modules, hg_num_features=hg_num_features,
                                hg_depth=hg_depth, use_avg_pool=use_avg_pool, use_instance_norm=use_instance_norm,
-                               stem_conv_stride=stem_conv_stride, stem_pool_kernel_size=stem_pool_kernel_size)
+                               stem_conv_kernel_size=stem_conv_kernel_size, stem_conv_stride=stem_conv_stride,
+                               stem_pool_kernel_size=stem_pool_kernel_size)
