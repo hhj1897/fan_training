@@ -3,8 +3,8 @@ import numpy as np
 from copy import deepcopy
 
 
-__all__ = ['load_pts', 'save_pts', 'get_iods', 'get_bbox_sizes', 'flip_landmarks', 'flip_heatmaps',
-           'encode_landmarks', 'decode_landmarks', 'get_iods', 'get_bbox_sizes', ]
+__all__ = ['load_pts', 'save_pts', 'get_iods', 'get_bbox_sizes', 'get_landmark_symmetry',
+           'flip_landmarks', 'flip_heatmaps', 'encode_landmarks', 'decode_landmarks']
 
 
 def load_pts(pts_path, one_based=True):
@@ -48,34 +48,34 @@ def get_bbox_sizes(bbox_corners):
     return bbox_sizes, bbox_widths, bbox_heights
 
 
-def flip_landmarks(landmarks, im_width):
-    pts_pairs = ([0, 16], [1, 15], [2, 14], [3, 13], [4, 12], [5, 11], [6, 10], [7, 9],
-                 [17, 26], [18, 25], [19, 24], [20, 23], [21, 22], [36, 45], [37, 44],
-                 [38, 43], [39, 42], [41, 46], [40, 47], [31, 35], [32, 34], [50, 52],
-                 [49, 53], [48, 54], [60, 64], [61, 63], [67, 65], [59, 55], [58, 56])
+def get_landmark_symmetry():
+    return ((0, 16), (1, 15), (2, 14), (3, 13), (4, 12), (5, 11), (6, 10), (7, 9), (17, 26), (18, 25), (19, 24),
+            (20, 23), (21, 22), (36, 45), (37, 44), (38, 43), (39, 42), (41, 46), (40, 47), (31, 35), (32, 34),
+            (50, 52), (49, 53), (48, 54), (60, 64), (61, 63), (67, 65), (59, 55), (58, 56), (68, 75), (69, 74),
+            (70, 73), (71, 72), (76, 82), (77, 81), (78, 80), (79, 83), (84, 86), (85, 87), (88, 89), (92, 95),
+            (93, 94), (99, 96), (98, 97), (91, 90))
 
+
+def flip_landmarks(landmarks, im_width, landmark_symmetry=get_landmark_symmetry()):
     if landmarks is torch.Tensor:
         result = landmarks.clone()
     else:
         result = deepcopy(landmarks)
-    for cur_pair in pts_pairs:
-        result[..., cur_pair[0], :] = landmarks[..., cur_pair[1], :]
-        result[..., cur_pair[1], :] = landmarks[..., cur_pair[0], :]
+    for cur_pair in landmark_symmetry:
+        if cur_pair[0] < landmarks.shape[-2] and cur_pair[1] < landmarks.shape[-2]:
+            result[..., cur_pair[0], :] = landmarks[..., cur_pair[1], :]
+            result[..., cur_pair[1], :] = landmarks[..., cur_pair[0], :]
     result[..., 0] = im_width - result[..., 0]
 
     return result
 
 
-def flip_heatmaps(heatmaps):
-    pts_pairs = ([0, 16], [1, 15], [2, 14], [3, 13], [4, 12], [5, 11], [6, 10], [7, 9],
-                 [17, 26], [18, 25], [19, 24], [20, 23], [21, 22], [36, 45], [37, 44],
-                 [38, 43], [39, 42], [41, 46], [40, 47], [31, 35], [32, 34], [50, 52],
-                 [49, 53], [48, 54], [60, 64], [61, 63], [67, 65], [59, 55], [58, 56])
-
+def flip_heatmaps(heatmaps, landmark_symmetry=get_landmark_symmetry()):
     result = heatmaps.clone()
-    for cur_pair in pts_pairs:
-        result[..., cur_pair[0], :, :] = heatmaps[..., cur_pair[1], :, :]
-        result[..., cur_pair[1], :, :] = heatmaps[..., cur_pair[0], :, :]
+    for cur_pair in landmark_symmetry:
+        if cur_pair[0] < heatmaps.shape[-3] and cur_pair[1] < heatmaps.shape[-3]:
+            result[..., cur_pair[0], :, :] = heatmaps[..., cur_pair[1], :, :]
+            result[..., cur_pair[1], :, :] = heatmaps[..., cur_pair[0], :, :]
 
     return result.flip(-1)
 

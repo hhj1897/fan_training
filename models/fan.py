@@ -137,14 +137,16 @@ class FAN(nn.Module):
             self.add_module('bn_end' + str(hg_module),
                             nn.InstanceNorm2d(self.config.hg_num_features) if self.config.use_instance_norm
                             else nn.BatchNorm2d(self.config.hg_num_features))
-            self.add_module('l' + str(hg_module), nn.Conv2d(self.config.hg_num_features, 68,
+            self.add_module('l' + str(hg_module), nn.Conv2d(self.config.hg_num_features,
+                                                            self.config.num_landmarks,
                                                             kernel_size=1, stride=1, padding=0))
 
             if hg_module < self.config.num_modules - 1:
                 self.add_module('bl' + str(hg_module), nn.Conv2d(self.config.hg_num_features,
                                                                  self.config.hg_num_features,
                                                                  kernel_size=1, stride=1, padding=0))
-                self.add_module('al' + str(hg_module), nn.Conv2d(68, self.config.hg_num_features,
+                self.add_module('al' + str(hg_module), nn.Conv2d(self.config.num_landmarks,
+                                                                 self.config.hg_num_features,
                                                                  kernel_size=1, stride=1, padding=0))
 
     def forward(self, x):
@@ -181,8 +183,8 @@ class FAN(nn.Module):
     @staticmethod
     def create_config(input_size=256, num_modules=2, hg_num_features=256, hg_depth=4,
                       use_avg_pool=False, use_instance_norm=False, stem_conv_kernel_size=7,
-                      stem_conv_stride=2, stem_pool_kernel_size=2):
+                      stem_conv_stride=2, stem_pool_kernel_size=2, num_landmarks=68):
         return SimpleNamespace(input_size=input_size, num_modules=num_modules, hg_num_features=hg_num_features,
                                hg_depth=hg_depth, use_avg_pool=use_avg_pool, use_instance_norm=use_instance_norm,
                                stem_conv_kernel_size=stem_conv_kernel_size, stem_conv_stride=stem_conv_stride,
-                               stem_pool_kernel_size=stem_pool_kernel_size)
+                               stem_pool_kernel_size=stem_pool_kernel_size, num_landmarks=num_landmarks)

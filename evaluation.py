@@ -52,9 +52,13 @@ def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
             results['landmark_distance_losses'] = lmk_dist_losses
 
         # Compute heatmap errors
+        num_landmarks = min(predicted_heatmaps[-1].shape[-3], heatmaps.shape[-3])
+        num_landmarks2 = min(predicted_heatmaps2[-1].shape[-3], heatmaps.shape[-3])
         htm_errors = torch.stack(
-            (((predicted_heatmaps[-1] - heatmaps) ** 2).mean(dim=(-1, -2)),
-             ((predicted_heatmaps2[-1] - heatmaps) ** 2).mean(dim=(-1, -2))),
+            (((predicted_heatmaps[-1][..., :num_landmarks, :, :] -
+               heatmaps[..., :num_landmarks, :, :]) ** 2).mean(dim=(-1, -2)),
+             ((predicted_heatmaps2[-1][..., :num_landmarks2, :, :] -
+               heatmaps[..., :num_landmarks2, :, :]) ** 2).mean(dim=(-1, -2))),
             dim=1).detach().cpu().numpy()
         if results['heatmap_errors'].shape[0] > 0:
             results['heatmap_errors'] = np.concatenate((results['heatmap_errors'], htm_errors))
@@ -113,7 +117,8 @@ def run_model(model, data_loader, pbar=None, gamma=1.0, radius=0.1):
 def compute_landmark_errors(predicted_landmarks, landmarks):
     if landmarks.ndim < predicted_landmarks.ndim:
         landmarks = np.expand_dims(landmarks, tuple(range(1, 1 + predicted_landmarks.ndim - landmarks.ndim)))
-    return np.linalg.norm(predicted_landmarks - landmarks, axis=-1)
+    num_landmarks = min(predicted_landmarks.shape[-2], landmarks.shape[-2])
+    return np.linalg.norm(predicted_landmarks[..., :num_landmarks, :] - landmarks[..., :num_landmarks, :], axis=-1)
 
 
 def compute_auc(landmark_errors, threshold, normalisation_factors=None, sample_weights=None, reduction_axis=-1):
