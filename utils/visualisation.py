@@ -2,10 +2,10 @@ import cv2
 import numpy as np
 
 
-__all__ = ['get_landmark_connections', 'plot_landmarks']
+__all__ = ['get_landmark_connectivity', 'plot_landmarks']
 
 
-def get_landmark_connections(num_landmarks):
+def get_landmark_connectivity(num_landmarks):
     if num_landmarks == 68:
         return ((0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12),
                 (12, 13), (13, 14), (14, 15), (15, 16), (17, 18), (18, 19), (19, 20), (20, 21), (22, 23), (23, 24),
@@ -31,14 +31,14 @@ def get_landmark_connections(num_landmarks):
 
 def plot_landmarks(frame, landmarks, scores=None, threshold=0.2,
                    connection_colour=(0, 255, 0), landmark_colour=(0, 0, 255),
-                   connection_thickness=1, landmark_radius=1, connections=None):
+                   connection_thickness=1, landmark_radius=1, landmark_connectivity=None):
     num_landmarks = len(landmarks)
     if scores is None:
         scores = np.full((num_landmarks,), threshold + 1.0, dtype=float)
-    if connections is None:
-        connections = get_landmark_connections(len(landmarks))
-    if connections is not None:
-        for (idx1, idx2) in connections:
+    if landmark_connectivity is None:
+        landmark_connectivity = get_landmark_connectivity(len(landmarks))
+    if landmark_connectivity is not None:
+        for (idx1, idx2) in landmark_connectivity:
             if (idx1 < num_landmarks and idx2 < num_landmarks and
                     scores[idx1] >= threshold and scores[idx2] >= threshold):
                 cv2.line(frame, tuple(landmarks[idx1].astype(int).tolist()),
